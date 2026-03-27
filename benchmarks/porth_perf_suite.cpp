@@ -8,55 +8,63 @@
  */
 
 #include <benchmark/benchmark.h>
-#include <cstddef>
-#include <cstdint>
-#include <memory>                     
+#include <atomic>
+#include <thread>
 #include "porth/PorthRingBuffer.hpp"
+#include "porth/PorthUtil.hpp"
 
 using namespace porth;
 
-/** @brief Domain constants to eliminate magic numbers and satisfy clang-tidy. */
-constexpr size_t BENCH_RING_SIZE    = 1024;
-constexpr uint64_t BENCH_ADDR       = 0x1000;
-constexpr uint32_t BENCH_LEN        = 64;
-constexpr int BENCH_REPETITIONS     = 5;
+constexpr size_t BENCH_RING_SIZE = 1024;
+constexpr uint64_t BENCH_ADDR    = 0x1000;
+constexpr uint32_t BENCH_LEN     = 64;
 
-/**
- * @brief benchmark the hot-path latency of a RingBuffer Push/Pop cycle.
- * @note Function renamed to lower_case to satisfy Sovereign naming conventions.
- */
-static void bm_ring_buffer_latency(benchmark::State& state) {
-    // 1. Setup: Pre-allocate resources to avoid jitter
+// 1. Single-Threaded Uncontended Latency (Baseline L1 Cache speed)
+static void bm_spsc_uncontended_latency(benchmark::State& state) {
     PorthRingBuffer<BENCH_RING_SIZE> ring;
-    
-    // Designated initializers used to satisfy modern C++ standards
     PorthDescriptor desc = {.addr = BENCH_ADDR, .len = BENCH_LEN};
-    PorthDescriptor out  = {.addr = 0, .len = 0};
+    PorthDescriptor out;
 
-    // 2. The Measurement Loop
     for (auto _ : state) {
-        /**
-         * @note We explicitly cast the return values to void to satisfy
-         * the [[nodiscard]] attribute enforced by the HFT-grade build flags.
-         * This ensures the benchmark measures the operation without warnings.
-         */
-        (void)ring.push(desc);
-        (void)ring.pop(out);
-
-        // Prevent compiler from optimizing away the operation
-        benchmark::DoNotOptimize(out);
+        benchmark::DoNotOptimize(ring.push(desc));
+        benchmark::DoNotOptimize(ring.pop(out));
     }
-
-    // 3. Add custom metadata for Sovereign Reporting
     state.SetItemsProcessed(state.iterations());
 }
+BENCHMARK(bm_spsc_uncontended_latency)->Unit(benchmark::kNanosecond);
 
-// Register the benchmark and force it to run on a specific core
-// 10/10 FIX: Run multiple repetitions so Google Benchmark can calculate 
-// statistics like Median, Mean, and Standard Deviation.
-BENCHMARK(bm_ring_buffer_latency)
-    ->Unit(benchmark::kNanosecond)
-    ->Repetitions(BENCH_REPETITIONS)
-    ->DisplayAggregatesOnly(true);
+// 2. Multi-Threaded Contended Throughput (Real-World HFT Scenario)
+static void bm_spsc_contended_throughput(benchmark::State& state) {
+    PorthRingBuffer<BENCH_RING_SIZE> ring;
+    std::atomic<bool> running{true};
+
+    // Dedicated Consumer Thread
+    std::thread consumer([&]() {
+        PorthDescriptor out;
+        while (running.load(std::memory_order_relaxed)) {
+            if (ring.pop(out)) {
+                benchmark::DoNotOptimize(out);
+            }
+        }
+    });
+
+    PorthDescriptor desc = {.addr = BENCH_ADDR, .len = BENCH_LEN};
+    
+    // Producer Loop
+    for (auto _ : state) {
+        // Spin until push is successful (simulating real hardware backpressure)
+        while (!ring.push(desc)) {
+            benchmark::DoNotOptimize(desc);
+        }
+    }
+
+    state.SetItemsProcessed(state.iterations());
+    
+    // Clean up
+    running.store(false, std::memory_order_relaxed);
+    consumer.join();
+}
+// Use RealTime to accurately measure cross-thread wall-clock performance
+BENCHMARK(bm_spsc_contended_throughput)->Unit(benchmark::kNanosecond)->UseRealTime();
 
 BENCHMARK_MAIN();

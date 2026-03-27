@@ -109,7 +109,7 @@ public:
             &m_umem, m_umem_buffer, umem_size, &m_fill_ring, &m_comp_ring, &umem_cfg);
 
         if (ret != 0) {
-            throw std::runtime_error("Failed to map PorthShuttle as XDP UMEM.");
+            throw std::runtime_error(std::format("Failed to map PorthShuttle as XDP UMEM. (Errno: {})", strerror(-ret)));
         }
 
         std::cout << "[Porth-XDP] Shuttle memory successfully mapped as Zero-Copy UMEM.\n"

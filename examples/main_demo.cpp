@@ -82,6 +82,11 @@ static void run_telemetry_stress_test(size_t iterations,
     constexpr auto packet_wait_us               = std::chrono::microseconds(100);
 
     for (size_t i = 0; i < iterations; ++i) {
+        
+        if (i % 5000 == 0 && i > 0) {
+            std::cout << std::format("[Stress-Test] Progress: {}% ({} samples)\n", (i * 100) / iterations, i) << std::flush;
+        }
+
         xdp_portal.bridge_to_shuttle(*driver.get_shuttle(), sovereign_stats);
 
         const uint64_t t1 = PorthClock::now_precise();
@@ -208,6 +213,8 @@ auto main(int argc, char** argv) -> int {
         run_telemetry_parking(regs, telemetry_hub.view(), parking_duration_s);
 
         metric.print_stats(cycles_per_ns_newport);
+        metric.save_markdown_report("BENCHMARKS.md", "End-to-End Sovereign Telemetry (MacBook/OrbStack)", cycles_per_ns_newport);
+
         std::cout << "[Success] Newport Cluster validated.\n";
 
     } catch (const std::exception& e) {

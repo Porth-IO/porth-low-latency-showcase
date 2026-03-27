@@ -19,7 +19,24 @@ FetchContent_Declare(
     json
     URL https://github.com/nlohmann/json/releases/download/v3.11.3/json.tar.xz
 )
-FetchContent_MakeAvailable(json)
+FetchContent_Declare(
+    benchmark
+    GIT_REPOSITORY https://github.com/google/benchmark.git
+    GIT_TAG        v1.8.3
+)
+FetchContent_Declare(
+    catch2
+    GIT_REPOSITORY https://github.com/catchorg/Catch2.git
+    GIT_TAG        v3.5.2
+)
+
+# Disable internal tests for dependencies to avoid GTest/Self-test overhead
+set(BENCHMARK_ENABLE_TESTING OFF CACHE BOOL "" FORCE)
+set(BENCHMARK_ENABLE_GTEST_TESTS OFF CACHE BOOL "" FORCE)
+set(BENCHMARK_ENABLE_INSTALL OFF CACHE BOOL "" FORCE)
+set(CATCH_INSTALL_HELPERS OFF CACHE BOOL "" FORCE)
+
+FetchContent_MakeAvailable(json benchmark catch2)
 
 # Header Search Paths
 include_directories(

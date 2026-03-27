@@ -70,7 +70,7 @@ private:
             return;
 
         try {
-            [[maybe_unused]] auto status = pin_thread_to_core(0);
+            [[maybe_unused]] auto status = pin_thread_to_core(2);
         } catch (...) {
         }
 

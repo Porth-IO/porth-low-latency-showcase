@@ -115,4 +115,19 @@ enum class PorthStatus : uint8_t {
     return (node < 0) ? 0 : node; // Fallback to Node 0 if virtualized
 }
 
+/**
+ * @brief Performance Guard: CPU Architecture Hint.
+ * Prevents "Pipeline Sizzling" during busy-wait loops, reducing CPU power consumption
+ * and preventing speculative execution from polluting the cache.
+ */
+inline void cpu_relax() noexcept {
+#if defined(__i386__) || defined(__x86_64__)
+    // PAUSE: Notifies the CPU that we are in a spin-loop
+    asm volatile("pause" ::: "memory");
+#elif defined(__aarch64__)
+    // ISB: Flushes the pipeline on ARM64 (Apple Silicon / OrbStack)
+    asm volatile("isb" ::: "memory");
+#endif
+}
+
 } // namespace porth
