@@ -33,7 +33,6 @@ constexpr size_t DEFAULT_METRIC_CAPACITY = 1000000;
 constexpr double PERCENTILE_Q1     = 25.0;
 constexpr double PERCENTILE_Q3     = 75.0;
 constexpr double PERCENTILE_P50    = 50.0;
-constexpr double PERCENTILE_P99    = 99.0;
 constexpr double PERCENTILE_P99_9  = 99.9;
 constexpr double PERCENTILE_P99_99 = 99.99;
 
@@ -168,7 +167,7 @@ public:
             out << i << " " << m_samples[i] << "\n";
         }
     }
-    
+
     /**
      * @brief print_stats(): Performs jitter analysis and outputs to console.
      * * Converts raw hardware cycles into nanoseconds based on the system clock.
@@ -188,17 +187,13 @@ public:
 
         const double q1_ns  = get_percentile_ns(sorted_samples, PERCENTILE_Q1, cycles_per_ns);
         const double q3_ns  = get_percentile_ns(sorted_samples, PERCENTILE_Q3, cycles_per_ns);
-        const double median_ns = get_percentile_ns(sorted_samples, PERCENTILE_P50, cycles_per_ns);
-        const double p99_ns   = get_percentile_ns(sorted_samples, PERCENTILE_P99, cycles_per_ns);
-        const double p9999_ns = get_percentile_ns(sorted_samples, PERCENTILE_P99_99, cycles_per_ns);
+        const double p99_ns = get_percentile_ns(sorted_samples, PERCENTILE_P99_99, cycles_per_ns);
 
         std::cout << "\n--- Porth-IO Jitter Analysis (ns) ---\n";
         std::cout << std::format("Mean:    {:.2f} ns\n", mean_cycles / cycles_per_ns);
-        std::cout << std::format("Median:  {:.2f} ns\n", median_ns);
         std::cout << std::format("StDev:   {:.2f} ns\n", stdev_cycles / cycles_per_ns);
         std::cout << std::format("IQR:     {:.2f} ns\n", q3_ns - q1_ns); // Measures consistency
-        std::cout << std::format("P99:     {:.2f} ns\n", p99_ns);
-        std::cout << std::format("P99.99:  {:.2f} ns\n", p9999_ns); // Measures worst-case jitter
+        std::cout << std::format("P99.99:  {:.2f} ns\n", p99_ns); // Measures worst-case jitter
     }
 
     /**

@@ -18,7 +18,6 @@
 #include <pthread.h>
 #include <sched.h>
 #include <string>
-#include <thread>
 
 namespace porth {
 
@@ -114,24 +113,6 @@ enum class PorthStatus : uint8_t {
 [[nodiscard]] inline auto get_current_numa_node() noexcept -> int {
     int node = numa_node_of_cpu(sched_getcpu());
     return (node < 0) ? 0 : node; // Fallback to Node 0 if virtualized
-}
-
-/**
- * @brief cpu_relax: High-frequency busy-wait hint to the CPU.
- *
- * This provides a "yield" hint during spin-loops. On x86, it executes the
- * 'pause' instruction, which reduces power consumption and prevents
- * "pipeline flush" penalties when the loop condition finally breaks.
- * Critical for maintainining sub-nanosecond precision in HFT hot-paths.
- */
-inline void cpu_relax() noexcept {
-#if defined(__i386__) || defined(__x86_64__)
-    asm volatile("pause" ::: "memory");
-#elif defined(__aarch64__)
-    asm volatile("yield" ::: "memory");
-#else
-    std::this_thread::yield();
-#endif
 }
 
 } // namespace porth
