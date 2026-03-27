@@ -1,0 +1,39 @@
+# --- Porth-IO: Sovereign Logic Layer Showcase ---
+
+# 1. Build Artifacts (CMake)
+build/
+bin/
+lib/
+CMakeFiles/
+CMakeCache.txt
+cmake_install.cmake
+Makefile
+install_manifest.txt
+compile_commands.json
+_deps/
+
+# 2. Local Showcase Symlinks (Created by build.sh)
+porth_showcase_demo
+porth_perf_suite
+test_safety_trip
+test_sim_chaos
+
+# 3. Development Tools & IDEs
+.vscode/
+.idea/
+*.swp
+*.swo
+.clangd/
+.cache/
+
+# 4. Logs and Reports (Non-Source Data)
+*.log
+*.json
+!configs/*.json
+!scenarios/*.json
+perf.data
+perf.data.old
+
+# 5. OS Specific Junk
+.DS_Store
+Thumbs.db

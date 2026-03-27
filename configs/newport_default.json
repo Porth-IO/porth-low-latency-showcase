@@ -1,0 +1,18 @@
+{
+  "chip_name": "Newport_GaN_200mm_Gen1",
+  "fabrication_node": "200mm_GaN_on_Silicon",
+  "base_delay_ns": 45,
+  "jitter_ns": 12,
+  "physics": {
+    "gate_drive_ps": 850,
+    "thermal_threshold_mc": 125000,
+    "fec_retry_penalty_ns": 40
+  },
+  "registers": {
+    "PHY_CTRL": "0x4000",
+    "FEC_ERR_COUNT": "0x4008",
+    "GATE_VOLTAGE_TUNING": "0x4010"
+  },
+  "vendor_id": "0x1234",
+  "device_id": "0x5678"
+}
