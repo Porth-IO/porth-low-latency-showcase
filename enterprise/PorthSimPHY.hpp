@@ -2,10 +2,7 @@
  * @file PorthSimPHY.hpp
  * @brief Physics-based emulator for the Newport Cluster physical layer (PHY).
  *
- * Porth-IO: The Sovereign Logic Layer
- *
- * Copyright (c) 2026 Porth-IO Contributors
- * SPDX-License-Identifier: Apache-2.0
+ * Porth-IO: Low Latency Showcase
  */
 
 #pragma once
@@ -64,9 +61,10 @@ constexpr double FEC_LOW_SNR_MULTIPLIER = 10.0;
  * @class PorthSimPHY
  * @brief Emulates PCIe physical layer effects for compound semiconductor interconnects.
  *
- * This class implements the Sovereign thermal/power feedback loop. It provides
- * a high-fidelity simulation of propagation delays and jitter caused by
- * physical fluctuations in the InP/GaN hardware lattice.
+ * This class implements a high-fidelity thermal and signal integrity feedback loop. 
+ * It provides a simulation of propagation delays and jitter caused by physical 
+ * fluctuations in the Indium Phosphide (InP) and Gallium Nitride (GaN) hardware 
+ * lattice, modeling real-world performance degradation under thermal load.
  */
 class PorthSimPHY : public IPhysicsModel {
 private:
@@ -85,7 +83,7 @@ private:
     /** @brief Probability of a Forward Error Correction (FEC) retry. */
     double m_fec_error_rate = DEFAULT_FEC_ERROR_RATE;
 
-    /** @brief Real-time laser temperature.
+    /** @brief Real-time laser temperature telemetry.
      * Shared across simulation threads to model thermal-induced signal degradation.
      */
     std::atomic<uint32_t> m_current_temp_mc{DEFAULT_BASE_TEMP_MC};
@@ -97,19 +95,15 @@ private:
     mutable std::uniform_int_distribution<int64_t> m_jitter_dist;
     mutable std::uniform_real_distribution<double> m_error_dist;
 
-    /** * @brief Performance Guard: CPU Architecture Hint.
-     * * Justification: Using architecture-specific relax instructions prevents
-     * "Pipeline Sizzling" during busy-wait loops, reducing CPU power consumption
-     * and preventing speculative execution from polluting the cache.
+    /** * @brief Architecture-specific CPU relax hint.
+     * Prevents "Pipeline Sizzling" during busy-wait loops, reducing power 
+     * consumption and preventing speculative execution from polluting the 
+     * cache during physics-driven stalls.
      */
     static void cpu_relax() noexcept {
 #if defined(__i386__) || defined(__x86_64__)
-        // PAUSE: Notifies the CPU that we are in a spin-loop, improving power
-        // efficiency and reducing the exit-latency of the loop.
         asm volatile("pause" ::: "memory");
 #elif defined(__aarch64__)
-        // ISB: Flushes the pipeline on ARM64 to ensure the loop condition is
-        // re-evaluated without speculative interference.
         asm volatile("isb" ::: "memory");
 #endif
     }
@@ -151,7 +145,7 @@ public:
         return 0;
     }
 
-    /** @brief Returns the model identifier for validation. */
+    /** @brief Returns the model identifier for hardware validation. */
     [[nodiscard]] auto model_name() const noexcept -> const char* override {
         return "Newport-InP-HighFi";
     }
@@ -162,18 +156,17 @@ public:
      * @param jitter_init The peak-to-peak jitter range.
      * @param cpns Clock calibration factor (Cycles per Nanosecond).
      */
-    // NOLINTNEXTLINE(bugprone-easily-swappable-parameters)
     explicit PorthSimPHY(uint64_t base_ns     = DEFAULT_BASE_DELAY_NS,
                          uint64_t jitter_init = DEFAULT_JITTER_INIT_NS,
                          double cpns          = DEFAULT_CPNS)
         : m_base_delay_ns(base_ns), m_jitter_ns(jitter_init),
-          m_thermal_limit_mc(45000), // Safety default
+          m_thermal_limit_mc(45000), 
           m_fec_penalty_ns(DEFAULT_FEC_PENALTY_NS), m_cycles_per_ns(cpns),
           m_gen(static_cast<std::mt19937::result_type>(std::random_device{}())),
           m_jitter_dist(-static_cast<int64_t>(jitter_init), static_cast<int64_t>(jitter_init)),
           m_error_dist(0.0, 1.0) {}
 
-    /** @brief Calibrates simulation physics based on real PDK data. */
+    /** @brief Calibrates simulation physics based on Physical Design Kit (PDK) data. */
     void calibrate_from_pdk(uint32_t thermal_mc, uint64_t fec_ns) noexcept {
         m_thermal_limit_mc = thermal_mc;
         m_fec_penalty_ns   = fec_ns;
@@ -187,22 +180,25 @@ public:
         const uint32_t current = m_current_temp_mc.load(std::memory_order_relaxed);
         if (temp_mc > current) {
             m_current_temp_mc.store(current + HEATING_STEP_MC,
-                                    std::memory_order_relaxed); // Gradual heating
+                                    std::memory_order_relaxed); 
         } else if (temp_mc < current) {
             m_current_temp_mc.store(current - COOLING_STEP_MC,
-                                    std::memory_order_relaxed); // Gradual cooling
+                                    std::memory_order_relaxed); 
         }
     }
 
+    /** @brief Sets the active Signal-to-Noise Ratio for error modeling. */
     void set_snr(int32_t snr_mdb) { m_current_snr = snr_mdb; }
 
-    /** @brief Returns the internal inertial temperature for register syncing. */
+    /** @brief Returns the internal inertial temperature for register synchronization. */
     [[nodiscard]] auto get_current_temp() const noexcept -> uint32_t {
         return m_current_temp_mc.load(std::memory_order_relaxed);
     }
 
     /**
-     * @brief apply_protocol_delay: Busy-waits to simulate physical propagation time.
+     * @brief apply_protocol_delay: Busy-waits to simulate physical propagation and decoding time.
+     * * This provides the "Digital Twin" with the ability to emulate real-world latency 
+     * characteristics based on thermal load and signal integrity.
      */
     auto apply_protocol_delay(int32_t current_snr = STANDARD_SNR_DB) noexcept -> void {
         int64_t random_jitter = 0;
@@ -213,7 +209,6 @@ public:
         uint64_t total_delay_ns =
             m_base_delay_ns + m_fec_penalty_ns + static_cast<uint64_t>(std::abs(random_jitter));
 
-        // Note: Using PDK-driven threshold synced to simulation state
         total_delay_ns += calculate_thermal_jitter(get_current_temp(), m_thermal_limit_mc);
         total_delay_ns += get_fec_penalty(current_snr, m_fec_error_rate);
 
@@ -227,7 +222,9 @@ public:
     }
 
     /**
-     * @brief Hot-swappable configuration for different hardware scenarios.
+     * @brief Hot-swappable configuration for hardware scenario modeling.
+     * @param base New base delay in nanoseconds.
+     * @param jitter New peak-to-peak jitter in nanoseconds.
      */
     auto set_config(uint64_t base, uint64_t jitter) -> void {
         m_base_delay_ns = base;

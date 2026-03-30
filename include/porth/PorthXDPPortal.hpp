@@ -1,12 +1,10 @@
 /**
  * @file PorthXDPPortal.hpp
- * @brief Zero-copy network bridge using AF_XDP for the Sovereign Logic Layer.
+ * @brief Zero-copy network bridge using AF_XDP for the Porth-IO framework.
  *
- * Porth-IO: The Sovereign Logic Layer
- *
- * Copyright (c) 2026 Porth-IO Contributors
- * SPDX-License-Identifier: Apache-2.0
+ * Porth-IO: Low Latency Showcase
  */
+
 #pragma once
 
 #include "PorthShuttle.hpp"
@@ -24,6 +22,15 @@
 
 namespace porth {
 
+/**
+ * @class PorthXDPPortal
+ * @brief High-performance network bridge utilizing AF_XDP for zero-copy data planes.
+ *
+ * This class facilitates kernel-bypass networking by binding an AF_XDP socket 
+ * directly to a shared memory region (UMEM). It allows the Porth-IO framework 
+ * to ingest network packets directly from the NIC into high-performance 
+ * HugePage-backed buffers without any intermediate kernel-to-userspace copies.
+ */
 class PorthXDPPortal {
 private:
     std::string m_ifname;
@@ -42,10 +49,10 @@ private:
     int m_xsk_fd = -1;
     void* m_umem_buffer{nullptr}; ///< Pointer to the underlying Shuttle memory
 
-    uint64_t m_umem_start{0}; ///< Start address of the Sovereign HugePage
-    uint64_t m_umem_end{0};   ///< End address of the Sovereign HugePage
+    uint64_t m_umem_start{0}; ///< Start address of the memory-mapped HugePage
+    uint64_t m_umem_end{0};   ///< End address of the memory-mapped HugePage
 
-    /** @brief Recycles a frame back to the NIC for future packet ingestion. */
+    /** @brief Recycles a frame descriptor back to the NIC for future packet ingestion. */
     void recycle_frame(uint64_t addr) noexcept {
         uint32_t idx_fill = 0;
         if (xsk_ring_prod__reserve(&m_fill_ring, 1, &idx_fill) == 1) {
@@ -54,8 +61,8 @@ private:
         }
     }
 
-    /** * @brief Internal validation helper to lower cognitive complexity.
-     * Functions defined inside the class body are implicitly inline.
+    /** * @brief Internal validation helper to ensure packet addresses reside within the HugePage. 
+     * Uses __attribute__((always_inline)) to eliminate call overhead in the fast path.
      */
     [[nodiscard]] __attribute__((always_inline)) auto is_addr_valid(uint64_t addr,
                                                                     uint32_t len) const noexcept
@@ -64,15 +71,20 @@ private:
     }
 
 public:
+    /**
+     * @brief Construct a new Porth-XDP-Portal.
+     * @param ifname The network interface to bind to (e.g., "eth0").
+     * @param queue_id The physical NIC queue index to hijack.
+     */
     explicit PorthXDPPortal(std::string ifname, uint32_t queue_id = 0)
         : m_ifname(std::move(ifname)), m_queue_id(queue_id) {
-        std::cout << std::format("[Porth-XDP] Initializing Sovereign Portal on {} (Queue {})...\n",
+        std::cout << std::format("[Porth-XDP] Initializing Portal on {} (Queue {})...\n",
                                  m_ifname,
                                  m_queue_id)
                   << std::flush;
     }
 
-    /** @brief Destructor: Releases AF_XDP resources. */
+    /** @brief Destructor: Gracefully releases AF_XDP UMEM and socket resources. */
     ~PorthXDPPortal() {
         std::cout << std::format("[Porth-XDP] Closing portal on {}. Releasing XDP hooks.\n",
                                  m_ifname)
@@ -87,9 +99,12 @@ public:
     }
 
     /**
-     * @brief Binds the XDP socket directly to the PorthShuttle's HugePage memory.
+     * @brief Binds the AF_XDP socket directly to the PorthShuttle's HugePage memory.
+     * * This is the core of the zero-copy architecture, mapping the userspace memory 
+     * directly into the kernel's XDP frame pool.
+     *
      * @tparam Cap The capacity of the Shuttle ring.
-     * @param shuttle The active DMA shuttle.
+     * @param shuttle The active DMA shuttle providing pinned memory.
      */
     template <size_t Cap>
     void bind_shuttle_memory(PorthShuttle<Cap>& shuttle) {
@@ -117,7 +132,9 @@ public:
     }
 
     /**
-     * @brief Hijacks the NIC queue and binds the AF_XDP socket to our UMEM.
+     * @brief Hijacks the NIC queue and binds the AF_XDP socket to the initialized UMEM.
+     * * Configures the socket with XDP_USE_NEED_WAKEUP for optimized polling in 
+     * high-performance environments.
      */
     void open_portal() {
         if (m_umem == nullptr) {
@@ -155,7 +172,13 @@ public:
     }
 
     /**
-     * @brief bridge_to_shuttle: Polls the NIC and pushes work to the hardware.
+     * @brief bridge_to_shuttle: Polls the AF_XDP RX ring and pushes descriptors to the DMA shuttle.
+     * * This performs the bridging between the network data plane and the 
+     * hardware data plane. It validates frame addresses and handles 
+     * telemetry updates.
+     *
+     * @param shuttle The target DMA shuttle for work delivery.
+     * @param stats Optional telemetry link for performance tracking.
      */
     template <size_t Cap>
     void bridge_to_shuttle(PorthShuttle<Cap>& shuttle, PorthStats* stats = nullptr) noexcept {
@@ -163,6 +186,7 @@ public:
         const uint32_t rcvd = xsk_ring_cons__peek(&m_rx_ring, 1, &idx_rx);
 
         if (rcvd == 0) {
+            // Wakeup hint for the driver if the fill ring is empty.
             if (xsk_ring_prod__needs_wakeup(&m_fill_ring)) {
                 (void)recvfrom(m_xsk_fd, nullptr, 0, MSG_DONTWAIT, nullptr, nullptr);
             }
@@ -173,6 +197,7 @@ public:
         const uint64_t packet_addr  = xsk_umem__add_offset_to_addr(desc->addr);
         const uint32_t packet_len   = desc->len;
 
+        // Security check: Ensure the kernel-provided address is within the pinned HugePage bounds.
         if (!is_addr_valid(packet_addr, packet_len)) {
             if (stats != nullptr) {
                 stats->dropped_packets.fetch_add(1, std::memory_order_relaxed);
@@ -182,6 +207,7 @@ public:
             return;
         }
 
+        // Push packet metadata to the hardware ring buffer.
         if (shuttle.ring()->push({.addr = packet_addr, .len = packet_len})) {
             xsk_ring_cons__release(&m_rx_ring, 1);
             if (stats != nullptr) {
@@ -190,13 +216,14 @@ public:
             }
             recycle_frame(desc->addr);
         } else {
+            // Buffer full: drop packet to preserve system determinism.
             if (stats != nullptr) {
                 stats->dropped_packets.fetch_add(1, std::memory_order_relaxed);
             }
         }
     }
 
-    // Prohibit copying and moving to maintain address stability for AF_XDP
+    // Prohibit copying and moving to maintain stable address mappings for the AF_XDP UMEM.
     PorthXDPPortal(const PorthXDPPortal&)                    = delete;
     auto operator=(const PorthXDPPortal&) -> PorthXDPPortal& = delete;
     PorthXDPPortal(PorthXDPPortal&&)                         = delete;

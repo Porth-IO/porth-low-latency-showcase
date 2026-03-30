@@ -37,3 +37,6 @@ perf.data.old
 # 5. OS Specific Junk
 .DS_Store
 Thumbs.db
+
+# 6. notes
+notes/

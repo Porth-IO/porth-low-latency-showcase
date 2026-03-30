@@ -2,10 +2,7 @@
  * @file PorthMetric.hpp
  * @brief Statistical analysis engine for ultra-low latency timing telemetry.
  *
- * Porth-IO: The Sovereign Logic Layer
- *
- * Copyright (c) 2026 Porth-IO Contributors
- * SPDX-License-Identifier: Apache-2.0
+ * Porth-IO: Low Latency Showcase
  */
 
 #pragma once
@@ -24,12 +21,12 @@ namespace porth {
 
 /**
  * @brief Default capacity for the metric buffer.
- * 1,000,000 samples provide a statistically significant window for 10Gbps
- * line-rate packet analysis without excessive resident set size (RSS) pressure.
+ * 1,000,000 samples provide a statistically significant window for high-speed
+ * packet analysis without excessive resident set size (RSS) pressure.
  */
 constexpr size_t DEFAULT_METRIC_CAPACITY = 1000000;
 
-/** @brief Percentile constants for statistical analysis. */
+/** @brief Percentile constants for statistical jitter and tail-latency analysis. */
 constexpr double PERCENTILE_Q1     = 25.0;
 constexpr double PERCENTILE_Q3     = 75.0;
 constexpr double PERCENTILE_P50    = 50.0;
@@ -38,25 +35,26 @@ constexpr double PERCENTILE_P99_99 = 99.99;
 
 /**
  * @class PorthMetric
- * @brief Statistical analysis engine for ultra-low latency timing.
+ * @brief Statistical analysis engine for high-precision timing telemetry.
  *
- * Optimized for the Newport Cluster, this class uses a pre-allocated buffer
- * to ensure that recording samples never triggers heap allocations or
- * context-switch-inducing Page Faults.
+ * Optimized for deterministic performance, this class utilizes a pre-allocated 
+ * sample buffer to ensure that recording timing data never triggers heap 
+ * allocations or context-switch-inducing Page Faults during the "Hot Path."
  */
 class PorthMetric {
 private:
     /**
      * @brief Pre-allocated sample buffer.
-     * Reserving this space upfront protects the "Hot Path" from 'malloc' jitter.
+     * Reserving this space upfront protects the measurement cycle from 
+     * 'malloc' related jitter and non-deterministic behavior.
      */
     std::vector<uint64_t> m_samples;
     size_t m_capacity;
     size_t m_count = 0;
 
     /**
-     * @brief Prepares a sorted copy of the recorded samples for analysis.
-     * @note This is an O(N log N) operation performed outside the hot path.
+     * @brief Prepares a sorted copy of the recorded samples for percentile analysis.
+     * @note This is an O(N log N) operation performed outside the measurement loop.
      * We create a copy to preserve the original chronological sequence of events.
      */
     [[nodiscard]] auto get_sorted_samples() const -> std::vector<uint64_t> {
@@ -67,8 +65,8 @@ private:
     }
 
     /**
-     * @brief Calculates the arithmetic mean.
-     * @param samples Vector of sorted/unsorted timing samples.
+     * @brief Calculates the arithmetic mean of the recorded timing samples.
+     * @param samples Vector of timing samples (sorted or unsorted).
      * @return double Average cycle count.
      */
     [[nodiscard]] auto calculate_mean(const std::vector<uint64_t>& samples) const noexcept
@@ -78,10 +76,10 @@ private:
     }
 
     /**
-     * @brief Calculates the standard deviation using the inner product for numerical stability.
+     * @brief Calculates the standard deviation for numerical stability analysis.
      * @param samples Timing samples.
-     * @param mean Pre-calculated mean.
-     * @return double Standard deviation in cycles.
+     * @param mean Pre-calculated mean of the sample set.
+     * @return double Standard deviation in hardware cycles.
      */
     [[nodiscard]] auto calculate_stdev(const std::vector<uint64_t>& samples,
                                        double mean) const noexcept -> double {
@@ -91,11 +89,11 @@ private:
     }
 
     /**
-     * @brief Retrieves a specific percentile and converts it to physical time (ns).
+     * @brief Retrieves a specific percentile and converts hardware cycles to nanoseconds.
      * @param samples Sorted timing samples.
      * @param percentile Target percentile (0.0 to 100.0).
-     * @param cpns Cycles Per Nanosecond (Hardware Frequency).
-     * @return double Latency in nanoseconds.
+     * @param cpns Cycles Per Nanosecond calibration constant.
+     * @return double Latency value in nanoseconds.
      */
     [[nodiscard]] auto
     get_percentile_ns(const std::vector<uint64_t>& samples,
@@ -110,8 +108,7 @@ private:
     }
 
     /**
-     * @brief Internal helper to write the formatted markdown table to a stream.
-     * Used for automated CI/CD performance regression tracking.
+     * @brief Internal helper to write a formatted markdown table for CI/CD metrics.
      */
     static void write_markdown_table(std::ostream& out,
                                      const std::string& label,
@@ -132,19 +129,20 @@ public:
     /**
      * @brief Construct a new Metric engine with a fixed capacity.
      * @param max_samples Total samples to pre-allocate.
-     * @note Memory is resized in the constructor to trigger all Page Faults
-     * during the initialization phase, rather than the measurement phase.
+     * @note Memory is initialized and paged in the constructor to prevent
+     * mid-run Page Faults during high-speed data collection.
      */
     explicit PorthMetric(size_t max_samples = DEFAULT_METRIC_CAPACITY) : m_capacity(max_samples) {
         m_samples.resize(m_capacity, 0);
     }
 
     /**
-     * @brief record(): Stores a latency sample in the zero-jitter buffer.
-     * * Hot-path telemetry: Performs a bounds check and a direct array write.
-     * * @param latency The raw cycle count delta (from PorthClock).
-     * @note This function is 'noexcept' and allocation-free to ensure it
-     * does not interfere with the high-speed code it is measuring.
+     * @brief record(): Stores a hardware cycle sample in the zero-jitter buffer.
+     *
+     * This function is 'noexcept' and allocation-free, designed to be used in
+     * time-critical code paths without introducing measurement bias.
+     *
+     * @param latency The raw hardware cycle count delta.
      */
     void record(uint64_t latency) noexcept {
         if (m_count < m_capacity) {
@@ -153,9 +151,8 @@ public:
     }
 
     /**
-     * @brief save_to_file(): Exports raw telemetry for external visualization (e.g.,
-     * Python/Gnuplot).
-     * @param filename Path to the output file.
+     * @brief save_to_file(): Exports raw telemetry for secondary analysis (CSV/Dat).
+     * @param filename Path to the target output file.
      */
     void save_to_file(const std::string& filename) {
         std::ofstream out(filename);
@@ -169,11 +166,11 @@ public:
     }
 
     /**
-     * @brief print_stats(): Performs jitter analysis and outputs to console.
-     * * Converts raw hardware cycles into nanoseconds based on the system clock.
-     * * @param cycles_per_ns Frequency constant from calibration.
-     * @note Focuses on IQR and P99.99 to identify outlier noise caused by
-     * OS interrupts or thermal throttling on the InP/GaN lattice.
+     * @brief print_stats(): Performs jitter analysis and outputs to standard console.
+     * * Focuses on Interquartile Range (IQR) and tail percentiles (P99.99) to identify
+     * outliers caused by OS noise or thermal-induced lattice drift.
+     *
+     * @param cycles_per_ns System-specific clock calibration constant.
      */
     void print_stats(double cycles_per_ns) {
         if (m_count == 0) {
@@ -192,15 +189,15 @@ public:
         std::cout << "\n--- Porth-IO Jitter Analysis (ns) ---\n";
         std::cout << std::format("Mean:    {:.2f} ns\n", mean_cycles / cycles_per_ns);
         std::cout << std::format("StDev:   {:.2f} ns\n", stdev_cycles / cycles_per_ns);
-        std::cout << std::format("IQR:     {:.2f} ns\n", q3_ns - q1_ns); // Measures consistency
-        std::cout << std::format("P99.99:  {:.2f} ns\n", p99_ns); // Measures worst-case jitter
+        std::cout << std::format("IQR:     {:.2f} ns\n", q3_ns - q1_ns); // Measures jitter consistency
+        std::cout << std::format("P99.99:  {:.2f} ns\n", p99_ns); // Measures worst-case jitter outliers
     }
 
     /**
-     * @brief save_markdown_report(): Generates an automated summary table for CI/CD documentation.
-     * * @param filename File path to append to.
-     * @param label The name of the benchmark run (e.g., "Shuttle-Throughput").
-     * @param cycles_per_ns Calibration constant for conversion.
+     * @brief save_markdown_report(): Generates a summary for automated documentation.
+     * @param filename File path to append the report to.
+     * @param label The descriptor for this specific benchmark run.
+     * @param cycles_per_ns System-specific clock calibration constant.
      */
     void
     save_markdown_report(const std::string& filename // NOLINT(bugprone-easily-swappable-parameters)
@@ -222,12 +219,9 @@ public:
         write_markdown_table(out, label, min_ns, median_ns, p999_ns, max_ns);
     }
 
-    /** @brief Resets the sample count for a new run.
-     * @note Does not deallocate memory; zeroing the counter is an O(1) operation.
-     */
+    /** @brief Resets the sample count for a new measurement run without reallocating. */
     void reset() noexcept { m_count = 0; }
 
-    // Boilerplate compliance for HFT resource management
     PorthMetric(const PorthMetric&)                        = default;
     auto operator=(const PorthMetric&) -> PorthMetric&     = default;
     PorthMetric(PorthMetric&&) noexcept                    = default;

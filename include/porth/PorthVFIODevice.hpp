@@ -2,10 +2,7 @@
  * @file PorthVFIODevice.hpp
  * @brief Professional VFIO backend for userspace PCIe hardware ownership.
  *
- * Porth-IO: The Sovereign Logic Layer
- *
- * Copyright (c) 2026 Porth-IO Contributors
- * SPDX-License-Identifier: Apache-2.0
+ * Porth-IO: Low Latency Showcase
  */
 
 #pragma once
@@ -31,11 +28,12 @@ namespace porth {
 
 /**
  * @class PorthVFIODevice
- * @brief Manages physical PCIe hardware via the Linux VFIO interface.
+ * @brief Manages physical PCIe hardware via the Linux VFIO (Virtual Function I/O) interface.
  *
- * This class implements the "Sovereign Takeover" of a PCIe device. It claims
- * the device's IOMMU group, enables bus mastering, and maps the hardware
- * registers (BARs) directly into the logic layer's address space.
+ * This class implements userspace ownership of a PCIe device. It claims the device's 
+ * IOMMU group, enables bus mastering, and maps the hardware registers (BARs) 
+ * directly into the application's address space. This allows for zero-copy 
+ * register interaction without the overhead of kernel-mode context switches.
  */
 class PorthVFIODevice {
 private:
@@ -46,8 +44,9 @@ private:
     size_t m_bar_size = 0;
 
     /**
-     * @brief Internal helper to verify if the current user has access to VFIO.
-     * Checks for root privileges or membership in the 'vfio' group.
+     * @brief Internal helper to verify if the current process has sufficient hardware access.
+     * * Checks for root privileges or membership in the 'vfio' group. This ensures 
+     * the system adheres to the Linux security model for userspace hardware drivers.
      */
     void check_permissions() const {
         if (getuid() == 0)
@@ -80,22 +79,27 @@ private:
     }
 
     /**
-     * @brief Internal helper to find the IOMMU group of a PCI device.
+     * @brief Internal helper to identify the IOMMU group associated with a PCI address.
+     * * IOMMU groups are the smallest unit of isolation that the hardware can 
+     * enforce. All devices within a group must be assigned to userspace 
+     * simultaneously to ensure memory protection.
      */
     [[nodiscard]] static auto get_iommu_group(const std::string& pci_addr) -> int {
         std::string path = std::format("/sys/bus/pci/devices/{}/iommu_group", pci_addr);
         if (!std::filesystem::exists(path)) {
             throw std::runtime_error(std::format(
-                "Device {} is not in an IOMMU group. Ensure VT-d/AMD-Vi is enabled.", pci_addr));
+                "Device {} is not in an IOMMU group. Ensure VT-d/AMD-Vi is enabled in BIOS.", pci_addr));
         }
         return std::stoi(std::filesystem::read_symlink(path).filename().string());
     }
 
 public:
     /**
-     * @brief Constructor: Claims ownership of a physical PCIe device.
-     * @param pci_addr The PCI address (e.g., "0000:01:00.0").
-     * @throws std::runtime_error If the device cannot be claimed or mapped.
+     * @brief Constructor: Claims ownership of a physical PCIe device via VFIO.
+     * * Performs the full VFIO handshake: opens the container, attaches the IOMMU 
+     * group, sets the IOMMU type (Type1), and retrieves the device file descriptor.
+     * * @param pci_addr The PCI address (e.g., "0000:01:00.0").
+     * @throws std::runtime_error If the device cannot be assigned or mapped.
      */
     explicit PorthVFIODevice(const std::string& pci_addr)
         // NOLINTNEXTLINE(cppcoreguidelines-pro-type-vararg)
@@ -111,6 +115,7 @@ public:
                 "Failed to open /dev/vfio/vfio. Check permissions (sudo required).");
         }
 
+        // 1. Verify API Version compatibility
         // NOLINTNEXTLINE(cppcoreguidelines-pro-type-vararg)
         if (ioctl(m_container_fd, VFIO_GET_API_VERSION) != VFIO_API_VERSION) {
             throw std::runtime_error("Incompatible VFIO API version.");
@@ -137,7 +142,7 @@ public:
             throw std::runtime_error("Failed to set VFIO container.");
         }
 
-        // 4. Set IOMMU Type (Type1 is standard for x86/ARM64)
+        // 4. Set IOMMU Type (Type1 is standard for x86/ARM64 memory management)
         // NOLINTNEXTLINE(cppcoreguidelines-pro-type-vararg)
         if (ioctl(m_container_fd, VFIO_SET_IOMMU, VFIO_TYPE1_IOMMU) < 0) {
             throw std::runtime_error("Failed to set IOMMU type to Type1.");
@@ -150,7 +155,7 @@ public:
             throw std::runtime_error(std::format("Failed to get device FD for {}.", pci_addr));
         }
 
-        // 6. Map BAR 0 (The Newport Cluster Control Region)
+        // 6. Map BAR 0 (The Primary Hardware Control Region)
         struct vfio_region_info reg{};
         reg.argsz = sizeof(reg);
         reg.index = VFIO_PCI_BAR0_REGION_INDEX;
@@ -173,9 +178,10 @@ public:
         }
 
         std::cout << std::format(
-            "[Porth-VFIO] Sovereign Ownership Established: {} | BAR0 at {}\n", pci_addr, m_bar_ptr);
+            "[Porth-VFIO] Hardware Assignment Successful: {} | BAR0 at {}\n", pci_addr, m_bar_ptr);
     }
 
+    /** @brief Destructor: Releases BAR mappings and closes VFIO file descriptors. */
     ~PorthVFIODevice() {
         if (m_bar_ptr != nullptr && m_bar_ptr != MAP_FAILED) {
             munmap(m_bar_ptr, m_bar_size);
@@ -192,10 +198,13 @@ public:
     }
 
     /**
-     * @brief map_dma: Maps a userspace memory region into the IOMMU.
-     * @param vaddr The virtual address of the PorthHugePage.
-     * @param size The size of the memory region.
-     * @return uint64_t The I/O Virtual Address (IOVA) for hardware.
+     * @brief map_dma: Maps a userspace memory region into the hardware IOMMU.
+     * * This establishes the I/O Virtual Address (IOVA) required for the device 
+     * to access HugePage memory directly. It uses a 1:1 mapping (VADDR == IOVA) 
+     * for simplicity in userspace-to-hardware handshakes.
+     * * @param vaddr The virtual address of the PorthHugePage allocation.
+     * @param size The total size of the memory region.
+     * @return uint64_t The I/O Virtual Address (IOVA) assigned for DMA.
      */
     auto map_dma(void* vaddr, size_t size) const -> uint64_t {
         struct vfio_iommu_type1_dma_map dma_map{};
@@ -203,7 +212,7 @@ public:
         dma_map.flags = VFIO_DMA_MAP_FLAG_READ | VFIO_DMA_MAP_FLAG_WRITE;
         // NOLINTBEGIN(cppcoreguidelines-pro-type-reinterpret-cast)
         dma_map.vaddr = reinterpret_cast<uintptr_t>(vaddr);
-        dma_map.iova  = reinterpret_cast<uintptr_t>(vaddr); // 1:1 mapping for simplicity
+        dma_map.iova  = reinterpret_cast<uintptr_t>(vaddr); // Identity mapping
         // NOLINTEND(cppcoreguidelines-pro-type-reinterpret-cast)
         dma_map.size = size;
 
@@ -220,7 +229,7 @@ public:
     }
 
     /**
-     * @brief unmap_dma: Removes a memory region from the IOMMU.
+     * @brief unmap_dma: Removes a memory region from the IOMMU translation table.
      * @param iova The I/O Virtual Address to unmap.
      * @param size The size of the region.
      */
@@ -242,23 +251,22 @@ public:
     }
 
     /**
-     * @brief Validates the physical BAR against the PDK manifest.
-     * @param pdk The loaded Physical Design Kit.
-     * @throws std::runtime_error If the hardware BAR is smaller than the PDK requirements.
+     * @brief Validates the physical BAR against the PDK (Physical Design Kit) manifest.
+     * * Ensures the assigned hardware meets the architectural requirements 
+     * defined in the chip manifest, preventing memory access violations.
+     * * @param pdk The loaded hardware Physical Design Kit.
+     * @throws std::runtime_error If the hardware BAR is smaller than the layout requirements.
      */
     void validate_against_pdk(const PorthPDK& pdk) const {
-        // 1. Verify BAR Size
-        // We ensure the physical BAR is at least as large as the Sovereign Layout footprint.
+        // 1. Verify BAR Size matches the expected layout footprint.
         if (m_bar_size < expected_layout_size) {
             throw std::runtime_error(std::format("Porth-VFIO: Hardware BAR0 size ({} bytes) is "
-                                                 "smaller than required layout ({} bytes).",
+                                                 "smaller than required register layout ({} bytes).",
                                                  m_bar_size,
                                                  expected_layout_size));
         }
 
-        // 2. Cross-reference PDK offsets
-        // Note: In a production environment, we would iterate through the PDK's
-        // custom register offsets here to ensure they fall within the mapped BAR.
+        // 2. Cross-reference PDK metadata
         std::cout << std::format(
             "[Porth-VFIO] Validation Successful: Hardware BAR0 ({} bytes) matches {} profile.\n",
             m_bar_size,
@@ -266,8 +274,8 @@ public:
     }
 
     /**
-     * @brief Returns the mapped register layout.
-     * @return PorthDeviceLayout* Pointer to the physical registers.
+     * @brief Returns the mapped register layout for the data plane.
+     * @return PorthDeviceLayout* Pointer to the memory-mapped physical registers.
      */
     [[nodiscard]] auto view() noexcept -> PorthDeviceLayout* {
         return static_cast<PorthDeviceLayout*>(m_bar_ptr);

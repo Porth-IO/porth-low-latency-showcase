@@ -3,6 +3,11 @@ High-Performance C++23 Framework for Sub-Microsecond Hardware Control
 
 ---
 
+## 📌 Showcase Context
+**Recruiter Note:** This repository is a clear, focused example of my work on the Porth-IO project. It is designed to show how I handle high-speed networking and hardware-software integration without the extra complexity of a full production codebase.
+
+---
+
 ## 🎯 Executive Summary (The "Why")
 
 In high-stakes environments like compound semiconductor manufacturing (GaN/InP), hardware interconnects require sub-microsecond response times to prevent catastrophic equipment failure. Standard Linux networking stacks introduce "jitter"—unpredictable delays caused by kernel overhead, context switching, and cache misses.

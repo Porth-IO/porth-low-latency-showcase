@@ -1,11 +1,8 @@
 /**
  * @file PorthPDK.hpp
- * @brief Dynamic register map loader for the "Universal Translator" vision.
+ * @brief Dynamic register map loader for the "Universal Translator" hardware abstraction vision.
  *
- * Porth-IO: The Sovereign Logic Layer (Open Core)
- *
- * Copyright (c) 2026 Porth-IO Contributors
- * SPDX-License-Identifier: Apache-2.0
+ * Porth-IO: Low Latency Showcase
  */
 
 #pragma once
@@ -21,11 +18,12 @@ namespace porth {
 
 /**
  * @class PorthPDK
- * @brief Handles dynamic loading of semiconductor foundry register maps.
+ * @brief Manages dynamic loading of semiconductor foundry Physical Design Kit (PDK) manifests.
  *
- * This class parses JSON manifests that define the physical boundaries and
- * register offsets of a specific chip. It allows Porth-IO to adapt to
- * different hardware (InP, GaN, etc.) without recompilation.
+ * This class parses JSON manifests that define the physical boundaries, timing floors, 
+ * and register offsets of specific semiconductor chips. It enables Porth-IO to adapt to 
+ * different hardware substrates (e.g., InP, GaN) without requiring logic recompilation, 
+ * maintaining architectural flexibility across varied hardware targets.
  */
 class PorthPDK {
 private:
@@ -40,9 +38,12 @@ private:
     uint16_t m_device_id{0};
 
 public:
-    /** * @brief Load a JSON manifest defining the hardware register map.
-     * @param path Filepath to the PDK JSON manifest.
-     * @return true if loaded and validated, false otherwise.
+    /** * @brief Loads a JSON manifest defining the hardware-specific register map and physics.
+     * * Parses metadata including vendor/device IDs, base propagation delays, jitter floors, 
+     * and thermal thresholds. These parameters calibrate the logic layer's expectations 
+     * and the simulation engine's physical fidelity.
+     * * @param path Filepath to the PDK JSON manifest.
+     * @return true if the manifest was successfully loaded and validated; false otherwise.
      */
     auto load_manifest(const std::string& path) -> bool {
         std::ifstream f(path);
@@ -93,19 +94,36 @@ public:
         }
     }
 
+    /** @brief Returns the hardware-specific chip identifier. */
     [[nodiscard]] auto get_chip_name() const noexcept -> std::string { return m_chip_name; }
+    
+    /** @brief Returns the calibrated baseline propagation delay in nanoseconds. */
     [[nodiscard]] auto get_base_delay() const noexcept -> uint64_t { return m_base_delay_ns; }
+    
+    /** @brief Returns the expected peak-to-peak hardware jitter in nanoseconds. */
     [[nodiscard]] auto get_jitter() const noexcept -> uint64_t { return m_jitter_ns; }
+    
+    /** @brief Returns the Indium Phosphide (InP) lattice thermal threshold in milli-Celsius. */
     [[nodiscard]] auto get_thermal_limit() const noexcept -> uint32_t {
         return m_thermal_threshold_mc;
     }
+    
+    /** @brief Returns the hardware-specific Forward Error Correction (FEC) retry penalty. */
     [[nodiscard]] auto get_fec_penalty() const noexcept -> uint64_t { return m_fec_penalty_ns; }
+    
+    /** @brief Returns the number of physical DMA channels supported by the device. */
     [[nodiscard]] auto get_num_channels() const noexcept -> uint32_t { return m_num_channels; }
 
+    /** @brief Returns the 16-bit PCI Vendor ID. */
     [[nodiscard]] auto get_vendor_id() const noexcept -> uint16_t { return m_vendor_id; }
+    
+    /** @brief Returns the 16-bit PCI Device ID. */
     [[nodiscard]] auto get_device_id() const noexcept -> uint16_t { return m_device_id; }
 
-    /** @brief Retrieves the byte offset for a specific named register. */
+    /** * @brief Retrieves the hardware byte offset for a specific named register defined in the PDK. 
+     * @param name The identifier of the register (e.g., "PHY_CTRL").
+     * @return uint64_t The absolute offset relative to the BAR0 base, or 0 if not found.
+     */
     [[nodiscard]] auto get_offset(const std::string& name) const -> uint64_t {
         if (auto it = m_offsets.find(name); it != m_offsets.end()) {
             return it->second;

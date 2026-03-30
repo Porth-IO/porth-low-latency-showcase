@@ -2,10 +2,7 @@
  * @file PorthClock.hpp
  * @brief Hardware-abstracted access to high-precision CPU cycle counters.
  *
- * Porth-IO: The Sovereign Logic Layer
- *
- * Copyright (c) 2026 Porth-IO Contributors
- * SPDX-License-Identifier: Apache-2.0
+ * Porth-IO: Low Latency Showcase
  */
 
 #pragma once
@@ -26,17 +23,21 @@ namespace porth {
  *
  * This class abstracts the differences between Intel TSC (Time Stamp Counter)
  * and the ARM64 Generic Timer (CNTVCT_EL0). It is designed for sub-microsecond
- * latency measurements in HFT and high-speed interconnect environments.
- * * @note All methods assume an invariant TSC/Timer frequency. On the Newport Cluster,
+ * latency measurements in high-frequency trading (HFT) and high-speed 
+ * interconnect environments.
+ *
+ * @note All methods assume an invariant TSC/Timer frequency. On the Newport Cluster,
  * this prevents timing drift caused by P-state transitions or thermal throttling.
  */
 class PorthClock {
 public:
     /**
      * @brief Reads the hardware cycle counter without serialization.
-     * * Fastest timing path available. On modern out-of-order CPUs, this read
-     * may be reordered by the front-end fetch unit.
-     * * @return uint64_t Current CPU clock cycles.
+     *
+     * This is the fastest timing path available. On modern out-of-order CPUs, this 
+     * read may be reordered by the front-end fetch unit.
+     *
+     * @return uint64_t Current CPU clock cycles.
      * @note Use this for high-frequency telemetry where the overhead of a pipeline
      * stall (serialization) outweighs the need for exact instruction-boundary precision.
      */
@@ -49,7 +50,7 @@ public:
         uint64_t virtual_timer_value = 0;
         // ARM64 Path: Read the virtual count register (CNTVCT_EL0).
         // This register provides a uniform view of time across all cores in the
-        // Newport Cluster, essential for cross-core event correlation.
+        // cluster, essential for cross-core event correlation.
         asm volatile("mrs %0, cntvct_el0" : "=r"(virtual_timer_value));
         return virtual_timer_value;
 #else
@@ -59,7 +60,8 @@ public:
 
     /**
      * @brief Reads the hardware cycle counter with instruction serialization.
-     * * Ensures that all previous instructions have reached the "retirement" stage
+     *
+     * Ensures that all previous instructions have reached the "retirement" stage
      * before the counter is sampled. Essential for measuring the execution delta
      * of critical code paths.
      *
@@ -85,10 +87,12 @@ public:
 
     /**
      * @brief Injects a hardware memory barrier (Fence).
-     * * Prevents the CPU and compiler from reordering memory operations across
-     * this point. This is the "Sovereign Guard" for lock-free concurrency.
-     * * @note Critical for SPSC/MPMC queues to ensure that data written to a buffer
-     * is globally visible before the 'tail' pointer update is committed.
+     *
+     * Prevents the CPU and compiler from reordering memory operations across
+     * this point. This is a critical guard for lock-free concurrency.
+     *
+     * @note Essential for SPSC/MPMC queues to ensure that data written to a 
+     * buffer is globally visible before the 'tail' pointer update is committed.
      */
     static void fence() noexcept {
 #if defined(__x86_64__) || defined(__i386__)

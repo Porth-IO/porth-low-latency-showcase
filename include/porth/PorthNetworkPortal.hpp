@@ -1,6 +1,8 @@
 /**
  * @file PorthNetworkPortal.hpp
- * @brief Production Build: Pure Sovereign Signal Interconnect.
+ * @brief Production-grade network bridge utilizing AF_XDP for kernel-bypass interconnects.
+ *
+ * Porth-IO: Low Latency Showcase
  */
 
 #pragma once
@@ -26,6 +28,15 @@
 
 namespace porth {
 
+/**
+ * @class PorthNetworkPortal
+ * @brief Manages zero-copy network I/O via AF_XDP (Address Family XDP).
+ *
+ * This class orchestrates the lifecycle of the User Memory (UMEM) region and 
+ * the associated AF_XDP socket. It allows the application to pull packets 
+ * directly from the NIC driver's RX ring into userspace memory, bypassing 
+ * the standard Linux network stack overhead.
+ */
 class PorthNetworkPortal {
 private:
     std::string m_ifname;
@@ -38,11 +49,12 @@ private:
     struct xsk_ring_prod m_tx_ring{};
     struct xsk_ring_cons m_rx_ring{};
 
+    /** @brief UMEM configuration for 4096 frames of 4KB each. */
     static constexpr uint32_t NUM_FRAMES = 4096;
     static constexpr uint32_t FRAME_SIZE = 4096;
     static constexpr size_t UMEM_SIZE    = static_cast<size_t>(NUM_FRAMES) * FRAME_SIZE;
 
-    // Constants for packet parsing
+    /** @brief Constants for surgical packet header parsing. */
     static constexpr uint32_t FILL_RING_RESERVE_SIZE = 64;
     static constexpr size_t ETH_P_OFF                = 12;
     static constexpr uint8_t ETH_P_IP_H              = 0x08;
@@ -53,12 +65,21 @@ private:
     static constexpr size_t TOTAL_HDR_LEN            = ETH_HLEN + IP_HLEN + UDP_HLEN; // 42 bytes
 
 public:
+    /**
+     * @brief Construct a new Porth-Network-Portal.
+     * @param ifname The target network interface name (e.g., "eth0").
+     * @throws std::runtime_error If initial UMEM memory allocation fails.
+     */
     explicit PorthNetworkPortal(std::string ifname) : m_ifname(std::move(ifname)) {
         if (posix_memalign(&m_umem_area, static_cast<size_t>(getpagesize()), UMEM_SIZE) != 0) {
             throw std::runtime_error("UMEM allocation failed");
         }
     }
 
+    /**
+     * @brief Registers the allocated memory area with the kernel as AF_XDP UMEM.
+     * @throws std::runtime_error If UMEM registration fails.
+     */
     void initialize_umem() {
         struct xsk_umem_config cfg = {.fill_size      = XSK_RING_PROD__DEFAULT_NUM_DESCS,
                                       .comp_size      = XSK_RING_CONS__DEFAULT_NUM_DESCS,
@@ -72,6 +93,10 @@ public:
         }
     }
 
+    /**
+     * @brief Creates and binds the AF_XDP socket to the specified interface.
+     * @throws std::runtime_error If socket creation fails.
+     */
     void create_socket() {
         struct xsk_socket_config cfg = {.rx_size      = XSK_RING_CONS__DEFAULT_NUM_DESCS,
                                         .tx_size      = XSK_RING_PROD__DEFAULT_NUM_DESCS,
@@ -85,6 +110,10 @@ public:
         }
     }
 
+    /**
+     * @brief Binds the AF_XDP socket file descriptor to the BPF redirection map.
+     * This allows the kernel-side XDP program to redirect packets to this socket.
+     */
     void bind_xsk_map() {
         if (m_bpf_obj == nullptr || m_xsk == nullptr) {
             return;
@@ -98,6 +127,10 @@ public:
         bpf_map_update_elem(map_fd, &key, &xsk_fd, BPF_ANY);
     }
 
+    /**
+     * @brief Populates the Fill Ring with UMEM addresses.
+     * This notifies the kernel of available buffers for incoming packets.
+     */
     void prime_fill_ring() {
         uint32_t idx = 0;
         uint32_t n   = xsk_ring_prod__reserve(&m_fill_ring, FILL_RING_RESERVE_SIZE, &idx);
@@ -107,6 +140,11 @@ public:
         xsk_ring_prod__submit(&m_fill_ring, n);
     }
 
+    /**
+     * @brief Polls the RX ring for incoming redirected packets.
+     * Performs a surgical extraction of telemetry payloads from UDP packets.
+     * @return uint32_t The number of packets processed.
+     */
     auto poll_rx() -> uint32_t {
         uint32_t idx  = 0;
         uint32_t rcvd = xsk_ring_cons__peek(&m_rx_ring, 1, &idx);
@@ -118,15 +156,16 @@ public:
             const struct xdp_desc* desc = xsk_ring_cons__rx_desc(&m_rx_ring, idx++);
             uint8_t* pkt_start          = static_cast<uint8_t*>(m_umem_area) + desc->addr;
 
-            // Check for IPv4 EtherType (0x0800)
+            // Header Validation: Check for IPv4 EtherType (0x0800)
             if (pkt_start[ETH_P_OFF] == ETH_P_IP_H && pkt_start[ETH_P_OFF + 1] == ETH_P_IP_L) {
-                // Surgical Extraction: Skip Eth(14) + IP(20) + UDP(8) = 42 bytes
+                // Surgical Extraction: Skip L2/L3/L4 headers (42 bytes) to reach payload.
                 // NOLINTNEXTLINE(cppcoreguidelines-pro-type-reinterpret-cast)
                 std::string payload(reinterpret_cast<char*>(pkt_start + TOTAL_HDR_LEN),
                                     desc->len - TOTAL_HDR_LEN);
-                std::cout << std::format("[Sovereign-Node] Signal: \"{}\"\n", payload);
+                std::cout << std::format("[Node] Signal: \"{}\"\n", payload);
             }
 
+            // Recycles the buffer address back into the Fill Ring.
             uint32_t f_idx = 0;
             if (xsk_ring_prod__reserve(&m_fill_ring, 1, &f_idx) == 1) {
                 *xsk_ring_prod__fill_addr(&m_fill_ring, f_idx) = desc->addr;
@@ -137,6 +176,7 @@ public:
         return rcvd;
     }
 
+    /** @brief Loads the compiled BPF object into the portal. */
     void load_kernel_program(const std::string& path) {
         m_bpf_obj = bpf_object__open_file(path.c_str(), nullptr);
         if (m_bpf_obj != nullptr) {
@@ -144,6 +184,7 @@ public:
         }
     }
 
+    /** @brief Destructor: Ensures graceful cleanup of eBPF and AF_XDP resources. */
     ~PorthNetworkPortal() {
         if (m_xsk != nullptr) {
             xsk_socket__delete(m_xsk);
@@ -165,6 +206,7 @@ public:
     PorthNetworkPortal(PorthNetworkPortal&&) noexcept                    = default;
     auto operator=(PorthNetworkPortal&&) noexcept -> PorthNetworkPortal& = default;
 
+    /** @brief Returns true if the AF_XDP socket is active. */
     [[nodiscard]] auto is_active() const noexcept -> bool { return m_xsk != nullptr; }
 };
 

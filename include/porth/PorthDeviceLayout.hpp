@@ -2,10 +2,7 @@
  * @file PorthDeviceLayout.hpp
  * @brief Physical memory map definition for Porth-IO hardware.
  *
- * Porth-IO: The Sovereign Logic Layer
- *
- * Copyright (c) 2026 Porth-IO Contributors
- * SPDX-License-Identifier: Apache-2.0
+ * Porth-IO: Low Latency Showcase
  */
 
 #pragma once
@@ -45,11 +42,12 @@ constexpr size_t offset_safety_trip = 0x1C0;
 
 /**
  * @struct PorthDeviceLayout
- * @brief The physical memory-mapped I/O (MMIO) layout for Porth-compatible hardware.
+ * @brief Physical memory-mapped I/O (MMIO) layout for Porth-compatible hardware.
  *
  * This structure defines the precise register map for interaction with
  * Newport Cluster compound semiconductor chips (InP/GaN).
- * * The layout utilizes "Hardware Isolation Padding" (spacing registers by 64 bytes).
+ *
+ * The layout utilizes "Hardware Isolation Padding" (spacing registers by 64 bytes).
  * This ensures that a PCIe Write TLP (Transaction Layer Packet) targeting one
  * register does not inadvertently affect the cache-line-granular prefetch
  * logic of the CPU for adjacent registers.
@@ -60,58 +58,58 @@ constexpr size_t offset_safety_trip = 0x1C0;
 struct alignas(cache_line_alignment) PorthDeviceLayout {
     /** * @brief Offset 0x00: Master control register.
      * Manages Start/Stop/Reset state machines. Writing 0x1 triggers
-     * the hardware-level sequencer for GaN power-on.
+     * the hardware-level sequencer for Gallium Nitride (GaN) power-on.
      */
     PorthRegister<uint32_t> control;
 
     /** * @brief Offset 0x40: Device status register.
-     * Indicates Ready/Busy/Error. Poll this register after a reset
-     * to ensure the InP lattice has stabilized.
+     * Indicates Ready/Busy/Error states. This register is typically polled 
+     * after a reset to ensure the Indium Phosphide (InP) lattice has stabilized.
      */
     PorthRegister<uint32_t> status;
 
     /** * @brief Offset 0x80: Data Plane pointer.
-     * Stores the 64-bit physical DMA base address. The hardware uses this
-     * to fetch payloads directly from HugePage memory via the Shuttle interconnect.
+     * Stores the 64-bit physical DMA base address. The hardware utilizes this
+     * to fetch payloads directly from HugePage memory via the DMA interconnect.
      */
     PorthRegister<uint64_t> data_ptr;
 
     /** * @brief Offset 0xC0: Telemetry counter.
-     * Tracks packet/work-unit throughput. Designed for 64-bit hardware
-     * wrap-around; the software layer should handle monotonic increments.
+     * Tracks packet and work-unit throughput. Designed for 64-bit hardware
+     * wrap-around; the logic layer handles monotonic increments.
      */
     PorthRegister<uint64_t> counter;
 
     /** * @brief Offset 0x100: Photonics Laser Temperature.
      * Unit: milli-Celsius (mC).
-     * @note Operational Limit: 45,000mC. Beyond this, Indium Phosphide
+     * @note Operational Limit: 45,000mC. Beyond this, thermal-induced 
      * lattice drift renders the signal-to-noise ratio (SNR) unusable.
      */
     PorthRegister<uint32_t> laser_temp;
 
     /** * @brief Offset 0x140: GaN Power Stage Voltage.
      * Unit: milli-Volts (mV).
-     * Tracks the drain-source voltage of the Gallium Nitride power FETs.
+     * Monitors the drain-source voltage of the Gallium Nitride power FETs.
      */
     PorthRegister<uint32_t> gan_voltage;
 
     /** * @brief Offset 0x180: RF Signal-to-Noise Ratio.
      * Unit: scaled dB (Value = dB * 100).
-     * Represents the integrity of the high-speed RF mode coupling.
+     * Represents the physical integrity of the high-speed RF mode coupling.
      */
     PorthRegister<int32_t> rf_snr;
 
     /** @brief Offset 0x1C0: Hardware Emergency Trip.
      * Write 0xDEADBEEF to trigger an immediate hardware-level shutdown.
-     * Designed to protect InP/GaN substrates during thermal/voltage excursions.
+     * Essential for protecting InP/GaN substrates during thermal or voltage excursions.
      */
     PorthRegister<uint32_t> safety_trip;
 };
 
 // --- PHYSICAL MEMORY AUDIT ---
-// These assertions act as the "Sovereign Guard." They prevent the C++ compiler
-// from optimizing, reordering, or padding the struct in a way that breaks
-// the binary contract with the Newport hardware.
+// These assertions act as a guard against non-deterministic compiler behavior. 
+// They prevent the C++ compiler from optimizing, reordering, or padding the 
+// struct in a way that breaks the binary contract with the Newport hardware.
 
 static_assert(std::is_standard_layout_v<PorthDeviceLayout>,
               "PorthDeviceLayout must be Standard Layout to guarantee C-style binary compatibility "
