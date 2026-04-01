@@ -22,9 +22,9 @@ Verified on bare-metal isolated CPU cores across 50,000 test cycles.
 
 | Metric                     | Result     | Technical Significance                                                      |
 |---------------------------|------------|----------------------------------------------------------------------------|
-| Mean Telemetry Latency    | 122.78 ns  | The average time for a signal to traverse the logic layer.                |
-| Precision (IQR)           | 0.42 ns    | Proves extreme consistency (low jitter) between execution cycles.         |
-| Tail Latency (P99.99)     | 1.3 µs     | The "worst-case" scenario, ensuring safety even during outliers.          |
+| Mean Telemetry Latency    | 278.34 ns  | The average time for a signal to traverse the logic layer.                |
+| Precision (IQR)           | 10.67 ns    | Proves extreme consistency (low jitter) between execution cycles.         |
+| Tail Latency (P99.99)     | 2.2 µs     | The "worst-case" scenario, ensuring safety even during outliers.          |
 | Throughput                | Line Rate  | Achieved via zero-copy DMA and lock-free synchronisation.                 |
 
 ---
