@@ -18,7 +18,7 @@ Porth-IO is a "Sovereign Logic Layer" designed to bypass these bottlenecks. By t
 
 ## 📈 Performance Manifest
 
-Verified on bare-metal isolated CPU cores across 50,000 test cycles.
+Verified on bare-metal isolated CPU cores across 200,000 test cycles.
 
 | Metric                     | Result     | Technical Significance                                                      |
 |---------------------------|------------|----------------------------------------------------------------------------|
