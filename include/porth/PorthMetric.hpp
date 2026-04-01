@@ -112,17 +112,17 @@ private:
      */
     static void write_markdown_table(std::ostream& out,
                                      const std::string& label,
-                                     double min_ns,
-                                     double median_ns,
-                                     double p999_ns,
-                                     double max_ns) {
+                                     double mean_ns,
+                                     double iqr_ns,
+                                     double p9999_ns,
+                                     double stdev_ns) {
         out << "### Benchmark: " << label << "\n";
         out << "| Metric | Latency (ns) |\n";
         out << "| :--- | :--- |\n";
-        out << std::format("| Minimum | {:.2f} |\n", min_ns);
-        out << std::format("| Median (P50) | {:.2f} |\n", median_ns);
-        out << std::format("| P99.9 | {:.2f} |\n", p999_ns);
-        out << std::format("| Maximum | {:.2f} |\n\n", max_ns);
+        out << std::format("| Mean | {:.2f} |\n", mean_ns);
+        out << std::format("| Jitter (IQR) | {:.2f} |\n", iqr_ns);
+        out << std::format("| Tail (P99.99) | {:.2f} |\n", p9999_ns);
+        out << std::format("| Standard Deviation | {:.2f} |\n\n", stdev_ns);
     }
 
 public:
@@ -200,10 +200,7 @@ public:
      * @param cycles_per_ns System-specific clock calibration constant.
      */
     void
-    save_markdown_report(const std::string& filename // NOLINT(bugprone-easily-swappable-parameters)
-                         ,
-                         const std::string& label,
-                         double cycles_per_ns) {
+    save_markdown_report(const std::string& filename, const std::string& label, double cycles_per_ns) {
         std::ofstream out(filename, std::ios::app);
         if (!out.is_open() || m_count == 0) {
             return;
@@ -211,12 +208,13 @@ public:
 
         const auto sorted_samples = get_sorted_samples();
 
-        const double min_ns    = get_percentile_ns(sorted_samples, 0.0, cycles_per_ns);
-        const double median_ns = get_percentile_ns(sorted_samples, PERCENTILE_P50, cycles_per_ns);
-        const double p999_ns   = get_percentile_ns(sorted_samples, PERCENTILE_P99_9, cycles_per_ns);
-        const double max_ns    = get_percentile_ns(sorted_samples, 100.0, cycles_per_ns);
+        const double mean_ns   = calculate_mean(sorted_samples) / cycles_per_ns;
+        const double stdev_ns  = calculate_stdev(sorted_samples, calculate_mean(sorted_samples)) / cycles_per_ns;
+        const double q1_ns     = get_percentile_ns(sorted_samples, PERCENTILE_Q1, cycles_per_ns);
+        const double q3_ns     = get_percentile_ns(sorted_samples, PERCENTILE_Q3, cycles_per_ns);
+        const double p9999_ns  = get_percentile_ns(sorted_samples, PERCENTILE_P99_99, cycles_per_ns);
 
-        write_markdown_table(out, label, min_ns, median_ns, p999_ns, max_ns);
+        write_markdown_table(out, label, mean_ns, q3_ns - q1_ns, p9999_ns, stdev_ns);
     }
 
     /** @brief Resets the sample count for a new measurement run without reallocating. */

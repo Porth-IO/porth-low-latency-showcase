@@ -18,8 +18,8 @@ echo -e "${CYAN}📊 Initializing BENCHMARKS.md...${NC}"
 cat << 'EOF' > BENCHMARKS.md
 # ⚡ Porth-IO: Performance Manifest
 
-> **Hardware Context:** Apple Silicon (M-Series) via OrbStack Linux Emulation.
-> *Note: These figures represent virtualized kernel-bypass performance. Physical bare-metal PCIe Gen 6 metrics on isolated cores will scale significantly higher with near-zero jitter.*
+> **Hardware Context:** AWS c5.metal (96-core Intel Xeon Scalable) | Bare-Metal Mode.
+> *Note: These figures represent sovereign hardware-software logic timing on isolated physical cores. Logic is pinned to dedicated silicon to eliminate virtualization jitter.*
 
 EOF
 

@@ -261,7 +261,8 @@ private:
                 update_thermal_model(dev, temp);
                 apply_chaos_effects(dev, gen, bit_dist);
             }
-            std::this_thread::sleep_for(std::chrono::microseconds(SIM_PHYSICS_STEP_US));
+            porth::cpu_relax();
+
         }
     }
 

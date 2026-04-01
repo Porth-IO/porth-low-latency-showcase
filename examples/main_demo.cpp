@@ -92,6 +92,9 @@ static void run_telemetry_stress_test(size_t iterations,
         // Bridge network signals into the zero-copy hardware memory fabric.
         xdp_portal.bridge_to_shuttle(*driver.get_shuttle(), telemetry_stats);
 
+        // Read the initial state of the hardware telemetry counter
+        const uint64_t initial_counter = regs->counter.load();
+
         const uint64_t t1 = PorthClock::now_precise();
 
         // Push a descriptor to the hardware-mapped DMA ring buffer.
@@ -99,20 +102,10 @@ static void run_telemetry_stress_test(size_t iterations,
             break;
         }
 
-        if (!is_audit) {
-            std::this_thread::sleep_for(packet_wait_us);
-        } else {
-            // High-precision spin-wait for audit scenarios to minimize scheduling jitter.
-            const uint64_t spin_start = PorthClock::now_precise();
-            while (PorthClock::now_precise() - spin_start < 50) { 
-                porth::cpu_relax();
-            }
-        }
-
-        // Simulate physical propagation delay across the Newport fabric.
-        const uint64_t start_delay = PorthClock::now_precise();
-        while (PorthClock::now_precise() - start_delay < propagation_delay_cycles) {
-            porth::cpu_relax();
+        // Poll the hardware counter until it acknowledges processing the packet.
+        // This forces the CPU to wait for the Digital Twin / Hardware to do its job.
+        while (regs->counter.load() <= initial_counter) {
+            porth::cpu_relax(); 
         }
 
         const uint64_t t2 = PorthClock::now_precise();
@@ -140,6 +133,27 @@ static void run_telemetry_parking(porth::PorthDeviceLayout* regs,
 }
 
 /**
+ * @brief Dynamically calibrates the CPU cycle counter frequency.
+ */
+static auto calibrate_cycles_per_ns() -> double {
+    std::cout << "[System] Calibrating hardware clock frequency...\n";
+    const auto start_wall = std::chrono::steady_clock::now();
+    const uint64_t start_cycles = porth::PorthClock::now_precise();
+    
+    // Sleep for 100ms to get a stable sample
+    std::this_thread::sleep_for(std::chrono::milliseconds(100));
+    
+    const uint64_t end_cycles = porth::PorthClock::now_precise();
+    const auto end_wall = std::chrono::steady_clock::now();
+    
+    const auto elapsed_ns = std::chrono::duration_cast<std::chrono::nanoseconds>(end_wall - start_wall).count();
+    const double cpns = static_cast<double>(end_cycles - start_cycles) / static_cast<double>(elapsed_ns);
+    
+    std::cout << std::format("[System] Clock Calibrated: {:.4f} cycles/ns\n", cpns);
+    return cpns;
+}
+
+/**
  * @brief Integrated entry point for the Porth-IO hardware-software showcase.
  */
 auto main(int argc, char** argv) -> int {
@@ -153,7 +167,7 @@ auto main(int argc, char** argv) -> int {
     int parking_duration_s = cfg.parking_duration;
     constexpr int handshake_poll_ms        = 1;
     constexpr size_t metric_samples        = 50000;
-    constexpr double cycles_per_ns_newport = 2.4;
+    const double cycles_per_ns_newport = calibrate_cycles_per_ns();
 
     std::cout << "--- Porth-IO: Integrated Logic Showcase ---\n";
 
